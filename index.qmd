@@ -1,0 +1,388 @@
+---
+title: "GAPMINDER | FERTILITY RATE & CHILD MORTALITY | 2000–2024"
+author: Adekemi Asaolu
+format: 
+  dashboard:
+    theme: default
+editor: visual
+---
+::: {.hidden}
+
+```{python}
+# Load packages
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import country_converter as coco
+import panel as pn
+from itables import show
+
+pn.extension()
+```
+
+
+```{python}
+# Load datasets
+fertility = pd.read_csv("data/fertility_rate.csv")
+child_mort = pd.read_csv("data/child_mortality_rate.csv")
+```
+
+```{python}
+# Transform from wide to long
+fertility_long = fertility.melt(id_vars='country', var_name='year', value_name='fertility_rate')
+childmort_long = child_mort.melt(id_vars='country', var_name='year', value_name='child_mortality')
+
+
+```
+
+
+```{python}
+#  Merge datasets and filter year
+df_long = pd.merge(fertility_long, childmort_long, on=['country', 'year'])
+df_long['year'] = df_long['year'].astype(int)
+df_filtered = df_long.query("2000 <= year <= 2024").copy()
+
+# Handle custom country name fixes
+custom_rename = {
+    "UAE": "United Arab Emirates",
+    "DRC": "Democratic Republic of the Congo",
+    "Côte d’Ivoire": "Ivory Coast",
+    "Kyrgyz Republic": "Kyrgyzstan",
+   
+}
+
+df_filtered['country_clean'] = df_filtered['country'].replace(custom_rename)
+
+# Convert to ISO3 and continent
+cc = coco.CountryConverter()
+df_filtered['iso3'] = cc.convert(names=df_filtered['country_clean'].tolist(), to='ISO3')
+df_filtered['continent'] = cc.convert(names=df_filtered['country_clean'].tolist(), to='continent')
+
+# Fill missing values
+df_filtered['iso3'] = df_filtered['iso3'].replace('not found', 'UNK')
+df_filtered['continent'] = df_filtered['continent'].replace('not found', 'Asia')
+
+```
+
+
+```{python}
+# Static bar chart for average child mortality by continent in 2024
+df_2024 = df_filtered[df_filtered['year'] == 2024]
+df_avg_2024 = df_2024.groupby('continent', as_index=False)['child_mortality'].mean()
+
+fig_bar = px.bar(
+    df_avg_2024, 
+    x='continent', 
+    y='child_mortality',
+    color='continent',
+    title="📊 Avg Child Mortality by Continent (2024)",
+    color_discrete_sequence=px.colors.qualitative.Set2
+)
+
+fig_bar
+```
+
+```{python}
+# Calculate 'average fertility rate'
+avg_fertility=round(df_filtered[df_filtered["year"] == 2024]["fertility_rate"].mean(), 2)
+```
+
+```{python}
+# Create bubble chart
+bubble = px.scatter(
+    df_filtered,
+    x="fertility_rate",
+    y="child_mortality",
+    size="child_mortality",
+    animation_frame="year",
+    color="continent",
+    hover_name="country",
+    size_max=60,
+    title="Fertility Rate vs Child Mortality (2000–2024)",
+    labels={"fertility_rate": "Fertility Rate", "child_mortality": "Child Mortality"},
+    color_discrete_sequence=px.colors.qualitative.Set2
+)
+bubble.update_layout(
+    title_x=0.5,
+    margin=dict(t=40, b=20, l=20, r=20),
+    height=550,
+    xaxis_title="Fertility Rate (births per woman)",
+    yaxis_title="Child Mortality Rate (per 1,000 live births)"
+)
+```
+
+```{python}
+   # Animated choropleth Plot for Fertility Rate 
+fig_fertility = px.choropleth(
+    df_filtered,
+    locations="iso3",
+    color="fertility_rate",
+    hover_name="country",
+    color_continuous_scale="YlGnBu",
+    animation_frame="year",
+    labels={"fertility_rate": "Fertility Rate"},
+    title="🌍 Fertility Rate by Country (2000–2024)"
+)
+
+fig_fertility.update_layout(
+    geo=dict(showframe=False, showcoastlines=True),
+    margin=dict(t=50, b=10, l=10, r=10),
+    height=600
+)
+```
+
+```{python}
+# Animated choropleth Plot for Child Mortality Rate
+fig_mortality = px.choropleth(
+    df_filtered,
+    locations="iso3",
+    color="child_mortality",
+    hover_name="country",
+    color_continuous_scale="OrRd",
+    animation_frame="year",
+    labels={"child_mortality": "Child Mortality"},
+    title="🌍 Child Mortality Rate by Country (2000–2024)"
+)
+
+fig_mortality.update_layout(
+    geo=dict(showframe=False, showcoastlines=True),
+    margin=dict(t=50, b=10, l=10, r=10),
+    height=600
+)
+```
+
+```{python}
+# Trend Analysis by Continent
+
+### 🌍 Fertility & Child Mortality Trends (2000–2024)
+# Group by continent and year to compute average fertility and mortality
+trend_data = (
+    df_filtered.groupby(["continent", "year"])
+    .agg(
+        avg_fertility=('fertility_rate', 'mean'),
+        avg_mortality=('child_mortality', 'mean')
+    )
+    .reset_index()
+)
+```
+
+```{python}
+# Child Mortality Trend
+fig_mortality_trend = px.line(
+    trend_data,
+    x="year",
+    y="avg_mortality",
+    color="continent",
+    title="📉 Avg Child Mortality by Continent (2000–2024)",
+    markers=True,
+    labels={"avg_mortality": "Avg Mortality"},
+    color_discrete_sequence=px.colors.qualitative.Set2
+)
+fig_mortality_trend.update_layout(height=400, title_x=0.5)
+fig_mortality_trend
+```
+
+```{python}
+# Fertility Trend
+fig_fertility_trend = px.line(
+    trend_data,
+    x="year",
+    y="avg_fertility",
+    color="continent",
+    title="📈 Avg Fertility Rate by Continent (2000–2024)",
+    markers=True,
+    labels={"avg_fertility": "Avg Fertility"},
+    color_discrete_sequence=px.colors.qualitative.Set2
+)
+fig_fertility_trend.update_layout(height=400, title_x=0.5)
+fig_fertility_trend
+```
+
+
+
+```{python}
+# Correlation heatmap
+correlation = df_filtered[['fertility_rate', 'child_mortality']].corr().round(2)
+fig_corr = go.Figure(data=go.Heatmap(
+    z=correlation.values,
+    x=correlation.columns,
+    y=correlation.columns,
+    colorscale='Blues',
+    zmin=0, zmax=1
+))
+fig_corr.update_layout(title="Correlation Between Fertility Rate and Child Mortality")
+```
+
+:::
+# HOME
+
+## Row 1 {layout-ncol=4}
+
+```{python}
+#| component: valuebox
+#| title: Countries Tracked
+#| icon: globe
+#| color: primary
+f"{df_filtered['country'].nunique():,}"
+```
+
+
+```{python}
+#| component: valuebox
+#| title: Avg Fertility (2024)
+#| icon: people
+#| color: info
+str(avg_fertility)
+```
+
+
+```{python}
+#| component: valuebox
+#| title: Region with Highest Child Mortality
+#| icon: flag
+#| color: warning
+df_filtered[df_filtered["year"] == 2024].groupby("continent")["child_mortality"].mean().idxmax()
+
+```
+
+
+
+## Row 2 {height=70%}
+
+### {width=70%}
+
+
+```{python}
+
+bubble
+
+```
+
+### {width=30%}
+
+### 🌍 Key Insights
+
+- **Fertility & child mortality** have declined globally.
+- **Africa** shows the highest values in both indicators.
+- High fertility often correlates with higher child mortality.
+- Improvements suggest better **education**, **healthcare**, and **family planning** efforts.
+
+_Explore the bubble chart to see how countries progress over time._
+
+
+
+# MAPS
+## ROW 1 {height=50%}
+
+```{python}
+   
+year_map = pn.widgets.IntSlider(
+    name="Select Year", 
+    start=2000, 
+    end=2024, 
+    value=2024, 
+    step=1, 
+    format='0000', 
+    width=300
+)
+```
+
+```{python}
+fig_fertility
+
+```
+
+
+```{python}
+
+fig_mortality
+```
+
+
+# CONTINENT ANALYSIS
+
+## Row 1 {height="50%"}
+ 
+
+```{python}
+fig_fertility_trend
+```
+
+
+
+```{python}
+fig_mortality_trend
+```
+
+# CORRELATION
+
+## Row {width="70%"}
+
+```{python}
+
+fig_corr
+```
+
+A correlation matrix like this quantifies the linear relationship between two continuous variables, with values ranging from –1 (a perfect negative linear relationship) to +1 (a perfect positive linear relationship), and values near 0 indicating little to no linear association. 
+
+Generally, coefficients in the range of **0.80–1.00 (or –0.80 to –1.00)** suggest a very strong relationship, implying that most of the variance in one variable is linearly explained by the other.
+
+ Correlations **between 0.60 and 0.80 (or –0.60 to –0.80)** represent a strong relationship, while those between **0.40 and 0.60 (or –0.40 to –0.60)** are considered moderate. 
+ 
+ Values **below 0.40** indicate a weak relationship, even if statistically significant, and should be interpreted with caution as other factors might be influencing the results.
+
+# DATA
+
+```{python}
+show(df_filtered, caption="Fertility & Child Mortality Data (2000–2024)", buttons=["csvHtml5"])
+```
+
+
+
+# ABOUT
+
+📊 **About This Dashboard**
+
+This dashboard presents a comprehensive exploration of global trends in fertility rates and child mortality from 2000 to 2024, leveraging data from the Gapminder Foundation.
+
+🔍 **Why This Matters**
+Fertility and child mortality are powerful indicators of a region’s health system, education, and socioeconomic development.
+
+Understanding these trends helps uncover inequities, track progress toward global health goals, and identify priority areas for intervention.
+
+
+🌍 **Key Global Insights**
+📉 Fertility rates have steadily declined across all continents, with the most notable shifts observed in Africa and Asia.
+
+🧒 Child mortality has dropped significantly, particularly in countries with improved access to healthcare, vaccinations, and maternal education.
+
+📈 Countries with lower fertility rates often also exhibit lower child mortality, highlighting the importance of family planning and women's empowerment.
+
+🛠️ **Technical Overview**
+Built using Python, Plotly, Pandas, and Quarto for interactive and reproducible storytelling.
+
+Key features include:
+
+🔄 Yearly animation of trends (2000–2024)
+
+🌐 Choropleth maps for spatial insights
+
+🧮 Value boxes summarizing key metrics
+
+📊 Trend charts by region
+
+📥 Downloadable data tables and visualizations
+
+
+🎯 **Goals of the Project**
+* To make complex development data accessible and visually compelling.
+
+* To support data-driven storytelling around human development indicators.
+
+* To empower users to explore, compare, and interpret patterns across countries and continents.
+
+
+
+
+
+
